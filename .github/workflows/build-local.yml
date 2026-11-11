@@ -1,0 +1,33 @@
+name: build-local
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.10'
+
+      - name: Build
+        run: |
+          CGO_ENABLED=0 go build -trimpath -buildvcs=false \
+            -ldflags "-s -w" \
+            -o meridian-linux-amd64 ./cmd/meridian
+          sha256sum meridian-linux-amd64 > SHA256SUMS
+
+      - name: Upload to release (tag local-latest)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: local-latest
+          name: local-latest
+          files: |
+            meridian-linux-amd64
+            SHA256SUMS
