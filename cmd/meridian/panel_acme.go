@@ -673,16 +673,18 @@ func fulfillCloudflareDNSAuthorization(ctx context.Context, acmeClient *acme.Cli
 	if err != nil {
 		return fmt.Errorf("prepare DNS-01 challenge: %w", err)
 	}
-	zoneName, err := acmeZoneForRoute(routeDomain, func(candidate string) (string, error) {
-		return cf.findZone(ctx, candidate)
+	var matchedZone string
+	zoneID, err := acmeZoneForRoute(routeDomain, func(candidate string) (string, error) {
+		id, lookupErr := cf.findZone(ctx, candidate)
+		if lookupErr == nil {
+			matchedZone = candidate
+		}
+		return id, lookupErr
 	})
 	if err != nil {
 		return fmt.Errorf("resolve DNS zone: %w", err)
 	}
-	zoneID, err := cf.findZone(ctx, zoneName)
-	if err != nil {
-		return err
-	}
+	zoneName := matchedZone
 	recordName := "_acme-challenge." + strings.TrimPrefix(authorization.Identifier.Value, "*.")
 	recordID, err := cf.createTXTRecord(ctx, zoneID, recordName, value)
 	if err != nil {
