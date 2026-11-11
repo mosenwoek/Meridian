@@ -18,9 +18,9 @@ const (
 
 func normalizeIPFamily(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case ipFamilyV4, "v4", "4", "ipv4":
+	case ipFamilyV4, "v4", "4":
 		return ipFamilyV4
-	case ipFamilyV6, "v6", "6", "ipv6":
+	case ipFamilyV6, "v6", "6":
 		return ipFamilyV6
 	default:
 		return ipFamilyAuto

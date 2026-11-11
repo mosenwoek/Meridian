@@ -45,7 +45,7 @@ func (g *streamGuard) wrap() http.ResponseWriter {
 }
 
 type streamGuardWriter struct {
-	*streamGuard
+	guard *streamGuard
 	http.ResponseWriter
 }
 
