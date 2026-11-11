@@ -95,6 +95,10 @@ func (m *meteredWriter) Write(b []byte) (int, error) {
 	return n, err
 }
 
+// Unwrap lets http.NewResponseController reach the underlying connection, which
+// the stream stall watchdog needs in order to force a write deadline.
+func (m *meteredWriter) Unwrap() http.ResponseWriter { return m.ResponseWriter }
+
 // Flush support for streaming
 func (m *meteredWriter) Flush() {
 	if f, ok := m.ResponseWriter.(http.Flusher); ok {
@@ -231,6 +235,9 @@ func (w *rateLimitedWriter) Write(b []byte) (int, error) {
 	}
 	return totalWritten, nil
 }
+
+// Unwrap keeps the controller chain intact for write-deadline forcing.
+func (w *rateLimitedWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (w *rateLimitedWriter) Flush() {
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
