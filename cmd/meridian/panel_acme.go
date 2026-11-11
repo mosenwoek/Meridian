@@ -345,11 +345,18 @@ func (m *panelCertificateManager) tlsConfig(enabled bool) (*tls.Config, bool, er
 	}, true, nil
 }
 
-func validatePanelCertificateRequest(email, token string) error {
+func validatePanelCertificateEmail(email string) error {
 	email = strings.TrimSpace(email)
 	address, err := mail.ParseAddress(email)
 	if err != nil || !strings.EqualFold(address.Address, email) || len(email) > 254 {
 		return errors.New("a valid ACME email address is required")
+	}
+	return nil
+}
+
+func validatePanelCertificateRequest(email, token string) error {
+	if err := validatePanelCertificateEmail(email); err != nil {
+		return err
 	}
 	token = strings.TrimSpace(token)
 	if len(token) < 20 || len(token) > 512 || strings.ContainsAny(token, "\r\n") {
@@ -774,6 +781,25 @@ func acmeZoneForRoute(routeDomain string, lookup func(string) (string, error)) (
 		lastErr = fmt.Errorf("no managed DNS zone found for %s", host)
 	}
 	return "", lastErr
+}
+
+func (c *cloudflareClient) listZones(ctx context.Context) ([]cloudflareZone, error) {
+	result, err := c.request(ctx, http.MethodGet, "/zones?per_page=50&status=active", nil)
+	if err != nil {
+		return nil, err
+	}
+	var zones []cloudflareZone
+	if err := json.Unmarshal(result, &zones); err != nil {
+		return nil, errors.New("Cloudflare DNS returned an invalid zone list")
+	}
+	return zones, nil
+}
+
+// cloudflareZone is the subset of the CF zone object the panel surfaces.
+type cloudflareZone struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
 }
 
 func (c *cloudflareClient) findZone(ctx context.Context, zoneName string) (string, error) {

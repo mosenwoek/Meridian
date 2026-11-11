@@ -43,6 +43,12 @@ function renderSites() {
           </div>
         </details>
         <input id="site-import-file" type="file" accept=".json,.csv,text/csv,application/json" hidden>
+        <select class="form-select" id="sites-sort" aria-label="站点排序方式">
+          <option value="custom">排序：自定义</option>
+          <option value="name-asc">名称 A→Z</option>
+          <option value="name-desc">名称 Z→A</option>
+          <option value="created-desc">最近添加</option>
+        </select>
         <label class="sites-search"><span class="sr-only">搜索站点</span><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16" y1="16" x2="21" y2="21"/></svg><input id="sites-search" type="search" placeholder="搜索站点名称或回源地址"></label>
         <select class="form-select account-lifecycle-filter" id="account-lifecycle-filter" aria-label="账号生命周期筛选">
           <option value="">账号：全部</option>
@@ -151,7 +157,7 @@ async function loadSites() {
 		const accessAddress = siteAccessAddress(s, siteIngressCapabilities);
 
       return `
-      <div class="site-card" data-site-id="${s.id}" data-site-search="${esc(`${s.name} ${s.target_url} ${s.public_host || ''}`.toLowerCase())}">
+      <div class="site-card" data-site-id="${s.id}" data-site-name="${esc(s.name)}" data-site-created="${esc(String(s.created_at || ''))}" data-site-order-index="${i}" data-site-search="${esc(`${s.name} ${s.target_url} ${s.public_host || ''}`.toLowerCase())}">
         <div class="site-top">
           <div class="site-heading">
             <button type="button" class="site-drag-handle" data-site-drag-handle aria-label="拖拽调整 ${esc(s.name)} 的顺序" title="拖拽调整顺序">
@@ -223,7 +229,16 @@ async function loadSites() {
       });
     });
     setupSiteSorting(grid);
+    const sortSelect = document.getElementById('sites-sort');
+    if (sortSelect) {
+      sortSelect.value = currentSiteSort();
+      if (!sortSelect.dataset.siteSortBound) {
+        sortSelect.dataset.siteSortBound = '1';
+        sortSelect.addEventListener('change', event => applySiteSort(event.target.value));
+      }
+    }
     filterSiteCards(searchQuery);
+    applySiteSort(currentSiteSort());
   } catch (e) {
     Toast.error('加载站点失败: ' + e.message);
   }
@@ -392,10 +407,42 @@ function filterSiteCards(query) {
   grid.querySelectorAll('.site-card').forEach(card => {
     card.hidden = !!needle && !String(card.dataset.siteSearch || '').includes(needle);
   });
+  const sorting = currentSiteSort() !== 'custom';
   grid.querySelectorAll('[data-site-drag-handle]').forEach(handle => {
-    handle.disabled = !!needle;
-    handle.title = needle ? '清除搜索后可调整顺序' : '拖拽调整顺序';
+    handle.disabled = !!needle || sorting;
+    handle.title = needle ? '清除搜索后可调整顺序' : sorting ? '切回“自定义”排序后可拖动' : '拖拽调整顺序';
   });
+}
+
+// Site sort mode is a pure client-side view preference; the persisted reorder
+// list is untouched so switching back to "自定义" restores drag order exactly.
+const SITE_SORT_KEY = 'meridian.siteSort';
+const siteNameCollator = (typeof Intl !== 'undefined' && Intl.Collator)
+  ? new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' })
+  : { compare: (a, b) => String(a).localeCompare(String(b)) };
+
+function currentSiteSort() {
+  try {
+    const saved = localStorage.getItem(SITE_SORT_KEY);
+    return ['custom', 'name-asc', 'name-desc', 'created-desc'].includes(saved) ? saved : 'custom';
+  } catch { return 'custom'; }
+}
+
+function applySiteSort(mode) {
+  const grid = document.getElementById('sites-grid');
+  if (!grid) return;
+  try { localStorage.setItem(SITE_SORT_KEY, mode); } catch { /* ignore quota/private mode */ }
+  const cards = [...grid.querySelectorAll('.site-card[data-site-id]')];
+  if (mode === 'custom') {
+    cards.sort((a, b) => Number(a.dataset.siteOrderIndex || 0) - Number(b.dataset.siteOrderIndex || 0));
+  } else if (mode === 'created-desc') {
+    cards.sort((a, b) => String(b.dataset.siteCreated || '').localeCompare(String(a.dataset.siteCreated || '')));
+  } else {
+    const dir = mode === 'name-desc' ? -1 : 1;
+    cards.sort((a, b) => dir * siteNameCollator.compare(a.dataset.siteName || '', b.dataset.siteName || ''));
+  }
+  cards.forEach(card => grid.appendChild(card));
+  filterSiteCards(document.getElementById('sites-search')?.value || '');
 }
 
 function siteOrderFromGrid(grid) {

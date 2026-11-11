@@ -25,6 +25,7 @@ function globalSettingsNav(active) {
   return `<aside class="settings-section-nav">
     ${button('system-ui', '系统设置')}${button('logs', '日志设置')}${button('updates', '版本更新')}
     <a href="#settings-tls" class="settings-nav-item ${active === 'tls' ? 'active' : ''}">TLS 设置</a>
+    <a href="#settings-cloudflare" class="settings-nav-item ${active === 'cloudflare' ? 'active' : ''}">Cloudflare</a>
     <a href="#telegram-report" class="settings-nav-item ${active === 'telegram' ? 'active' : ''}">Telegram Bot</a>
     <a href="#backup-restore" class="settings-nav-item ${active === 'backup' ? 'active' : ''}">备份与恢复</a>
   </aside>`;

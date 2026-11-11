@@ -35,6 +35,7 @@ REQUESTED_DOMAIN=""
 REQUESTED_PORT=""
 REQUESTED_WILDCARD=""
 DNS_TOKEN_FILE=""
+PANEL_PREFIX=""
 TRUST_LOCAL_PROXY=0
 CERTBOT_EMAIL=""
 INITIAL_SETUP_TOKEN=""
@@ -2084,7 +2085,10 @@ native_tls_panel_domain() {
     if [ -z "$domain" ] && [ -x "${INSTALL_DIR}/${BIN_NAME}" ]; then
         domain=$(read_env_value PANEL_DOMAIN)
     fi
-    domain=$(normalize_domain "${domain:-panel.${base}}")
+    # Default prefix is "panel"; PANEL_PREFIX lets the operator pick another
+    # single label (e.g. "emby") without having to spell out the full domain.
+    local default_prefix="${PANEL_PREFIX:-panel}"
+    domain=$(normalize_domain "${domain:-${default_prefix}.${base}}")
     valid_domain "$domain" || fail "请填写有效的面板完整域名"
     [[ "$domain" == "$base" || "$domain" == *".${base}" ]] \
         || fail "面板域名必须是节点基础域名或其下一层子域名；已有安装如需更换，请显式指定 --domain"
@@ -2305,6 +2309,12 @@ do_tls() (
         read -r -p "节点泛域名（例如 *.example.com，也可只填 example.com）: " wildcard
     fi
     wildcard=$(normalize_wildcard "$wildcard") || exit 1
+    if [ -z "$domain" ] && [ -z "$PANEL_PREFIX" ] && [ "$ASSUME_YES" != 1 ] && [ -z "$(read_env_value PANEL_DOMAIN)" ]; then
+        local prefix_hint
+        read -r -p "面板域名前缀（直接回车用 panel，也可填 emby 等）: " prefix_hint
+        prefix_hint=$(printf '%s' "$prefix_hint" | tr -d '\r')
+        if [ -n "$prefix_hint" ]; then PANEL_PREFIX="$prefix_hint"; fi
+    fi
     domain=$(native_tls_panel_domain "$wildcard" "$domain") || exit 1
     wildcard="${wildcard#\*.}"
     info "面板域名: ${domain}；节点泛域名: *.${wildcard}；使用 Meridian 原生 HTTPS"
@@ -3024,6 +3034,15 @@ run_cli() {
                 [ "$#" -ge 2 ] || fail "--wildcard 需要域名"
                 [ -z "$REQUESTED_WILDCARD" ] || fail "泛域名选项不能重复"
                 REQUESTED_WILDCARD=$(normalize_wildcard "$2") || exit 1
+                shift
+                ;;
+            --panel-prefix)
+                [[ "$action" = install || "$action" = tls ]] || fail "--panel-prefix 仅用于 install 或 tls"
+                [ "$#" -ge 2 ] || fail "--panel-prefix 需要前缀"
+                PANEL_PREFIX="${2#\*.}"
+                PANEL_PREFIX="${PANEL_PREFIX%%.*}"
+                [[ "$PANEL_PREFIX" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] \
+                    || fail "面板前缀无效（单个 DNS 标签，如 panel 或 emby）"
                 shift
                 ;;
             --dns-token-file)

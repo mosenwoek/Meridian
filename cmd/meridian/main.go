@@ -249,6 +249,8 @@ func main() {
 	mux.HandleFunc("/api/system-settings", cors(app.authMiddleware(app.handleSystemSettings)))
 	mux.HandleFunc("/api/ingress-capabilities", cors(app.authMiddleware(app.handleIngressCapabilities)))
 	mux.HandleFunc("/api/panel-certificate", cors(app.authMiddleware(app.handlePanelCertificate)))
+	mux.HandleFunc("/api/cloudflare", cors(app.authMiddleware(app.handleCloudflareSettings)))
+	mux.HandleFunc("/api/cloudflare/test", cors(app.authMiddleware(app.handleCloudflareTest)))
 	mux.HandleFunc("/api/system/update/check", cors(app.authMiddleware(app.handleSystemUpdateCheck)))
 	mux.HandleFunc("/api/system/update", cors(app.authMiddleware(app.handleSystemUpdate)))
 	mux.HandleFunc("/api/panel-settings", cors(app.authMiddleware(app.handlePanelSettings)))

@@ -519,6 +519,7 @@
       Router.register('request-logs', renderRequestLogs);
       Router.register('telegram-report', renderTelegramReport);
       Router.register('settings-tls', renderTLSSettings);
+      Router.register('settings-cloudflare', renderCloudflareSettings);
       Router.register('global-settings', renderGlobalSettings);
       Router.register('backup-restore', renderBackupRestore);
       Router.register('account', renderAccount);

@@ -8,12 +8,13 @@ const Router = {
     'request-logs': '日志记录',
     'telegram-report': 'Telegram Bot',
     'settings-tls': 'TLS 设置',
+    'settings-cloudflare': 'Cloudflare',
     'global-settings': '全局设置',
     'backup-restore': '备份与恢复',
     account: '账户',
     diagnostics: '故障诊断',
   },
-  parentRoutes: new Set(['settings-tls', 'telegram-report', 'backup-restore']),
+  parentRoutes: new Set(['settings-tls', 'settings-cloudflare', 'telegram-report', 'backup-restore']),
 
   register(path, handler) {
     this.routes[path] = handler;

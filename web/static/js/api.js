@@ -209,6 +209,9 @@ const API = {
   // Sites
   ingressCapabilities() { return this.request('GET', '/api/ingress-capabilities'); },
   panelCertificate() { return this.request('GET', '/api/panel-certificate'); },
+  cloudflareSettings() { return this.request('GET', '/api/cloudflare'); },
+  saveCloudflareSettings(data) { return this.request('POST', '/api/cloudflare', data); },
+  testCloudflareSettings(data) { return this.request('POST', '/api/cloudflare/test', data); },
   savePanelSettings(data) { return this.request('POST', '/api/panel-settings', data); },
   checkPanelSettings(data) { return this.request('POST', '/api/panel-settings/check', data); },
   requestPanelCertificate(data) { return this.request('POST', '/api/panel-certificate/issue', data); },
