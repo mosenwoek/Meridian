@@ -689,7 +689,12 @@ func fulfillCloudflareDNSAuthorization(ctx context.Context, acmeClient *acme.Cli
 		return id, lookupErr
 	})
 	if err != nil {
-		return fmt.Errorf("resolve DNS zone: %w", err)
+		// zoneResolutionError already carries a full operator-facing explanation.
+		var zoneErr *zoneResolutionError
+		if errors.As(err, &zoneErr) {
+			return err
+		}
+		return fmt.Errorf("解析 DNS Zone 失败: %w", err)
 	}
 	zoneName := matchedZone
 	recordName := "_acme-challenge." + strings.TrimPrefix(authorization.Identifier.Value, "*.")
@@ -746,6 +751,37 @@ func (c *cloudflareClient) request(ctx context.Context, method, requestPath stri
 	return envelope.Result, nil
 }
 
+// zoneResolutionError explains a failed DNS-01 zone lookup with the exact
+// candidates that were tried, so operators stop guessing whether the problem is
+// the token, the domain, or the zone.
+type zoneResolutionError struct {
+	Host     string
+	Tried    []string
+	LastErr  error
+	Rejected bool // API rejected the request (permission/credential) rather than "no such zone"
+}
+
+func (e *zoneResolutionError) Error() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "未在 Cloudflare 账号中找到与 %q 匹配的 Zone", e.Host)
+	if len(e.Tried) > 0 {
+		fmt.Fprintf(&b, "（已依次尝试：%s）", strings.Join(e.Tried, " → "))
+	}
+	b.WriteString("。请检查：")
+	switch {
+	case e.Rejected:
+		b.WriteString("① Token 权限是否包含 Zone → Zone → Read 与 Zone → DNS → Edit；② Token 是否已过期或被撤销；③ Zone Resources 是否包含目标域名。")
+	default:
+		b.WriteString("① 该域名是否已添加到当前 Cloudflare 账号（Zone 列表里能否看到）；② 域名拼写与泛域名是否一致；③ Token 是否有 Zone → Zone → Read 权限。")
+	}
+	if e.LastErr != nil {
+		fmt.Fprintf(&b, "（最后一条返回：%s）", e.LastErr.Error())
+	}
+	return b.String()
+}
+
+func (e *zoneResolutionError) Unwrap() error { return e.LastErr }
+
 // acmeZoneForRoute resolves the Cloudflare zone that should hold the DNS-01
 // challenge records for a route domain. PSL-based registrable domains are only
 // a heuristic: for private-domain subzones (e.g. nbbb.example under a
@@ -756,31 +792,35 @@ func (c *cloudflareClient) request(ctx context.Context, method, requestPath stri
 func acmeZoneForRoute(routeDomain string, lookup func(string) (string, error)) (string, error) {
 	host := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(routeDomain)), ".")
 	if host == "" {
-		return "", errors.New("route domain is empty")
+		return "", errors.New("节点泛域名为空，无法确定 DNS Zone")
 	}
 	if !strings.Contains(host, ".") {
-		return "", fmt.Errorf("route domain %s is not a valid DNS name", host)
+		return "", fmt.Errorf("%q 不是有效的 DNS 域名（缺少点号，无法确定 Zone）", host)
 	}
 	labels := strings.Split(host, ".")
 	if len(labels) < 2 {
-		return "", fmt.Errorf("route domain %s has no registrable suffix", host)
+		return "", fmt.Errorf("%q 缺少可注册后缀，无法确定 Zone", host)
 	}
 	// Candidate order: full host, then each parent up to (but not including)
 	// the bare TLD. The PSL registrable domain has no special priority: the
 	// provider decides which zone the account actually manages.
+	tried := make([]string, 0, len(labels)-1)
 	var lastErr error
 	for i := 0; i < len(labels)-1; i++ {
 		candidate := strings.Join(labels[i:], ".")
+		tried = append(tried, candidate)
 		zone, err := lookup(candidate)
 		if err == nil {
 			return zone, nil
 		}
 		lastErr = err
 	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("no managed DNS zone found for %s", host)
+	return "", &zoneResolutionError{
+		Host:     host,
+		Tried:    tried,
+		LastErr:  lastErr,
+		Rejected: lastErr != nil && strings.Contains(lastErr.Error(), "request was rejected"),
 	}
-	return "", lastErr
 }
 
 func (c *cloudflareClient) listZones(ctx context.Context) ([]cloudflareZone, error) {
@@ -811,7 +851,7 @@ func (c *cloudflareClient) findZone(ctx context.Context, zoneName string) (strin
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(result, &zones); err != nil || len(zones) == 0 || zones[0].ID == "" {
-		return "", fmt.Errorf("Cloudflare DNS zone %s was not found", zoneName)
+		return "", fmt.Errorf("Cloudflare 中不存在 zone %q（该账号不可见或名称不符）", zoneName)
 	}
 	return zones[0].ID, nil
 }
