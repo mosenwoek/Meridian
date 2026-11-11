@@ -30,7 +30,6 @@ import (
 	"time"
 
 	"golang.org/x/crypto/acme"
-	"golang.org/x/net/publicsuffix"
 )
 
 const (
@@ -674,7 +673,9 @@ func fulfillCloudflareDNSAuthorization(ctx context.Context, acmeClient *acme.Cli
 	if err != nil {
 		return fmt.Errorf("prepare DNS-01 challenge: %w", err)
 	}
-	zoneName, err := publicsuffix.EffectiveTLDPlusOne(routeDomain)
+	zoneName, err := acmeZoneForRoute(routeDomain, func(candidate string) (string, error) {
+		return cf.findZone(ctx, candidate)
+	})
 	if err != nil {
 		return fmt.Errorf("resolve DNS zone: %w", err)
 	}
@@ -734,6 +735,43 @@ func (c *cloudflareClient) request(ctx context.Context, method, requestPath stri
 		return nil, errors.New(message)
 	}
 	return envelope.Result, nil
+}
+
+// acmeZoneForRoute resolves the Cloudflare zone that should hold the DNS-01
+// challenge records for a route domain. PSL-based registrable domains are only
+// a heuristic: for private-domain subzones (e.g. nbbb.example under a
+// public-suffix "example") the user actually manages the deeper zone, so walk
+// upward from the full host and accept the first candidate the provider
+// reports as a known zone. The PSL-derived registrable domain is tried last as
+// a fallback so normal domains still resolve in a single expected lookup.
+func acmeZoneForRoute(routeDomain string, lookup func(string) (string, error)) (string, error) {
+	host := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(routeDomain)), ".")
+	if host == "" {
+		return "", errors.New("route domain is empty")
+	}
+	if !strings.Contains(host, ".") {
+		return "", fmt.Errorf("route domain %s is not a valid DNS name", host)
+	}
+	labels := strings.Split(host, ".")
+	if len(labels) < 2 {
+		return "", fmt.Errorf("route domain %s has no registrable suffix", host)
+	}
+	// Candidate order: full host, then each parent up to (but not including)
+	// the bare TLD. The PSL registrable domain has no special priority: the
+	// provider decides which zone the account actually manages.
+	var lastErr error
+	for i := 0; i < len(labels)-1; i++ {
+		candidate := strings.Join(labels[i:], ".")
+		zone, err := lookup(candidate)
+		if err == nil {
+			return zone, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no managed DNS zone found for %s", host)
+	}
+	return "", lastErr
 }
 
 func (c *cloudflareClient) findZone(ctx context.Context, zoneName string) (string, error) {
