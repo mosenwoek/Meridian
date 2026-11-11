@@ -185,6 +185,13 @@ func (d *DB) migrateOnce() error {
 		recorded_at DATETIME NOT NULL
 	);
 	CREATE INDEX IF NOT EXISTS idx_traffic_site_time ON traffic_logs(site_id, recorded_at);
+	CREATE TABLE IF NOT EXISTS playback_events (
+		site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+		bucket_at TEXT NOT NULL,
+		plays INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY (site_id, bucket_at)
+	);
+	CREATE INDEX IF NOT EXISTS idx_playback_bucket ON playback_events(bucket_at);
 	CREATE TABLE IF NOT EXISTS traffic_minute_logs (
 		site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
 		minute_start_unix INTEGER NOT NULL,
@@ -278,6 +285,8 @@ func (d *DB) migrateOnce() error {
 		log_display_status INTEGER NOT NULL DEFAULT 1, log_display_timeline INTEGER NOT NULL DEFAULT 1,
 			log_search_mode TEXT NOT NULL DEFAULT 'like',
 			session_epoch INTEGER NOT NULL DEFAULT 1,
+			ip_family TEXT NOT NULL DEFAULT 'auto',
+			ip_access TEXT NOT NULL DEFAULT '',
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 	INSERT OR IGNORE INTO system_settings (id) VALUES (1);
@@ -377,6 +386,8 @@ func (d *DB) migrateOnce() error {
 		{"log_display_upstream_ua", "ALTER TABLE system_settings ADD COLUMN log_display_upstream_ua INTEGER NOT NULL DEFAULT 1"},
 		{"log_display_backend_address", "ALTER TABLE system_settings ADD COLUMN log_display_backend_address INTEGER NOT NULL DEFAULT 1"},
 		{"session_epoch", "ALTER TABLE system_settings ADD COLUMN session_epoch INTEGER NOT NULL DEFAULT 1"},
+		{"ip_family", "ALTER TABLE system_settings ADD COLUMN ip_family TEXT NOT NULL DEFAULT 'auto'"},
+		{"ip_access", "ALTER TABLE system_settings ADD COLUMN ip_access TEXT NOT NULL DEFAULT ''"},
 	} {
 		var exists int
 		if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('system_settings') WHERE name=?", migration.column).Scan(&exists); err != nil {

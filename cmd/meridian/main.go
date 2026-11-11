@@ -169,6 +169,10 @@ func main() {
 		log.Fatalf("invalid client IP region configuration: %v", err)
 	}
 	pm := NewProxyManager(db, upstreamHeaderKey)
+	// Playback counts are flushed in batches; a busy evening must not turn into
+	// one SQLite write per play.
+	playbackCounter := newPlaybackCounter()
+	pm.onPlaybackStart = playbackCounter.recordPlaybackStart
 	if panelTLSEnabled {
 		pm.SetSiteTLSConfig(panelTLSConfig)
 	}
@@ -216,6 +220,7 @@ func main() {
 		pm:                pm,
 		setupToken:        setupToken,
 		loginLimiter:      newLoginRateLimiter(),
+		playbackCounts:    playbackCounter,
 		trustedProxies:    trustedProxies,
 		clientIPRegions:   clientIPRegions,
 		panelHost:         panelHost,
@@ -229,13 +234,18 @@ func main() {
 		dynamicRouteKey:   dynamicRouteKey,
 		restartCh:         make(chan struct{}),
 	}
+	// The panel is publicly reachable: load the IP policy once so the middleware
+	// does not hit SQLite on every request.
+	panelIPAccess.Store(compileIPAccess(db.loadIPAccessPolicy()))
 	go runPanelCertificateRenewalScheduler(ctx, db, panelCertificates)
+	go runPlaybackCounter(ctx, playbackCounter, db)
 	go app.runTelegramBot(ctx)
 
 	mux := http.NewServeMux()
 
 	// Public auth routes
 	mux.HandleFunc("/api/panel-ready", app.handlePanelReady)
+	mux.HandleFunc("/api/entry", cors(app.csrfMiddleware(app.handleEntryEscape)))
 	mux.HandleFunc("/api/auth/setup", cors(app.csrfMiddleware(app.handleSetup)))
 	mux.HandleFunc("/api/auth/login", cors(app.csrfMiddleware(app.handleLogin)))
 	mux.HandleFunc("/api/auth/logout", cors(app.csrfMiddleware(app.handleLogout)))
@@ -246,6 +256,8 @@ func main() {
 	mux.HandleFunc("/api/dashboard", cors(app.authMiddleware(app.handleDashboard)))
 	mux.HandleFunc("/api/dashboard-insights", cors(app.authMiddleware(app.handleDashboardInsights)))
 	mux.HandleFunc("/api/dashboard-trends", cors(app.authMiddleware(app.handleDashboardTrends)))
+	mux.HandleFunc("/api/playback-stats", cors(app.authMiddleware(app.handlePlaybackStats)))
+	mux.HandleFunc("/api/ip-access", cors(app.authMiddleware(app.handleIPAccess)))
 	mux.HandleFunc("/api/system-settings", cors(app.authMiddleware(app.handleSystemSettings)))
 	mux.HandleFunc("/api/ingress-capabilities", cors(app.authMiddleware(app.handleIngressCapabilities)))
 	mux.HandleFunc("/api/panel-certificate", cors(app.authMiddleware(app.handlePanelCertificate)))
@@ -292,7 +304,7 @@ func main() {
 	// bound by ProxyManager and are not affected by PANEL_BIND_ADDR.
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           app.publicHostRouter(panelBodyReadDeadline(securityHeaders(mux, app.trustedProxies))),
+		Handler:           app.publicHostRouter(panelBodyReadDeadline(securityHeaders(app.ipAccessMiddleware(mux), app.trustedProxies))),
 		ReadHeaderTimeout: 10 * time.Second,
 		// Shared-host site traffic can include long-running uploads. Header and
 		// per-endpoint body limits protect the panel without imposing a 30-second

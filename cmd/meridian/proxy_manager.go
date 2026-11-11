@@ -86,8 +86,11 @@ type ProxyManager struct {
 	dynamicInterfaceAddrs   dynamicInterfaceAddrsFunc
 	assetCache              *assetCache
 	siteTLSConfig           *tls.Config
-	progressRuntime         *progressGlobalRuntime
-	imageCacheRuntime       *imageCacheRuntime
+	// onPlaybackStart is called once per PlaybackInfo request so the panel can
+	// count playback sessions without parsing media bytes.
+	onPlaybackStart   func(siteID int64, when time.Time)
+	progressRuntime   *progressGlobalRuntime
+	imageCacheRuntime *imageCacheRuntime
 }
 
 // siteIngressClosedError means StopSite passed the irreversible boundary: new

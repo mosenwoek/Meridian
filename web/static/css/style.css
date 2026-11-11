@@ -4994,3 +4994,56 @@ html[data-theme="light"] .toast.error {
 .account-reminder-history-row.is-failed { border-color: rgba(239, 68, 68, .42); }
 .account-reminder-history-actions { display: flex; gap: 8px; margin-top: 4px; }
 .account-reminder-history-actions .btn-ghost { padding: 3px 8px; font-size: 12px; }
+
+/* Playback statistics: a compact bar strip plus a per-site ranking. */
+.playback-sparkline {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 96px;
+  padding: 12px 4px 0;
+}
+.playback-bar {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+  gap: 6px;
+}
+.playback-bar-fill {
+  width: 100%;
+  border-radius: 4px 4px 2px 2px;
+  background: linear-gradient(180deg, var(--accent, #578cff), rgba(87, 140, 255, 0.35));
+  min-height: 2px;
+  transition: height 0.25s ease;
+}
+.playback-bar span {
+  font-size: 10px;
+  color: var(--white-38);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.playback-site-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+}
+.playback-site-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--white-60);
+  padding: 6px 2px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+.playback-site-row strong {
+  color: var(--white-87);
+  font-weight: 600;
+}

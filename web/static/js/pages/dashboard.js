@@ -86,6 +86,11 @@ function renderDashboard() {
         <section class="dashboard-insight-card" id="dashboard-log-health"><div class="dashboard-insight-head"><h2>日志写入</h2><span class="dashboard-health-dot"></span></div><p>正在读取…</p></section>
         <section class="dashboard-insight-card" id="dashboard-schedule-health"><div class="dashboard-insight-head"><h2>定时任务</h2><span class="dashboard-health-dot"></span></div><p>正在读取…</p></section>
       </div>
+      <div class="glass-card" id="dashboard-playback-card">
+        <div class="glass-card-header"><div class="glass-card-title">播放统计</div><span class="glass-card-title" style="font-size:12px;color:var(--white-38)" id="dashboard-playback-summary">正在读取…</span></div>
+        <div id="dashboard-playback-chart" class="playback-sparkline"></div>
+        <div id="dashboard-playback-sites" class="playback-site-list"></div>
+      </div>
       <div class="glass-card dashboard-site-status">
         <div class="glass-card-header">
           <div class="glass-card-title"><span class="live-dot"></span>站点实时状态</div>
@@ -111,6 +116,7 @@ function renderDashboard() {
   });
   loadDashboardTable();
   loadDashboardInsights();
+  loadDashboardPlayback();
   loadDashboardTrends();
 }
 
@@ -1082,4 +1088,39 @@ function formatBytes(bytes) {
 	const i = Math.min(units.length - 1, Math.floor(Math.log(value) / Math.log(1024)));
 	const unit = units[i] || units[0];
 	return (value / Math.pow(1024, i)).toFixed(i > 1 ? 1 : 0) + ' ' + unit;
+}
+
+// Playback counts are the "how many times did someone press play" metric, which
+// byte counters cannot answer. Rendered as a compact bar strip plus a per-site
+// ranking so the busiest libraries are obvious at a glance.
+async function loadDashboardPlayback() {
+  const summary = document.getElementById('dashboard-playback-summary');
+  const chart = document.getElementById('dashboard-playback-chart');
+  const list = document.getElementById('dashboard-playback-sites');
+  if (!summary || !chart || !list) return;
+  try {
+    const data = await API.getPlaybackStats('7d', 'all');
+    if (Router.current !== 'dashboard') return;
+    const series = (data && data.series) || { points: [], total: 0, today: 0 };
+    const points = Array.isArray(series.points) ? series.points : [];
+    summary.textContent = `近 7 天 ${formatNumber(series.total || 0)} 次 · 今日 ${formatNumber(series.today || 0)} 次`;
+    if (!points.length) {
+      chart.innerHTML = '<p class="form-help">还没有播放记录。客户端开始播放后会自动统计。</p>';
+    } else {
+      const max = Math.max(1, ...points.map(p => p.plays || 0));
+      chart.innerHTML = points.map(point => {
+        const value = point.plays || 0;
+        const height = Math.max(2, Math.round((value / max) * 100));
+        const label = meridianFormatDateTime(Date.parse(point.at) || 0).slice(5, 10);
+        return `<div class="playback-bar" title="${esc(label)} · ${formatNumber(value)} 次"><div class="playback-bar-fill" style="height:${height}%"></div><span>${esc(label)}</span></div>`;
+      }).join('');
+    }
+    const bySite = Array.isArray(data && data.by_site) ? data.by_site : [];
+    list.innerHTML = bySite.length
+      ? bySite.slice(0, 8).map(row => `<div class="playback-site-row"><span>${esc(row.site_name || ('站点 ' + row.site_id))}</span><strong>${formatNumber(row.plays || 0)} 次</strong></div>`).join('')
+      : '';
+  } catch (error) {
+    summary.textContent = '播放统计读取失败';
+    console.warn('Dashboard playback load error', error);
+  }
 }

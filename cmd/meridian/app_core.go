@@ -37,6 +37,7 @@ type App struct {
 	panelDNSResolver  panelEndpointResolver
 	dynamicRouteKey   []byte
 	restartCh         chan struct{}
+	playbackCounts    *playbackCounter
 	restartOnce       sync.Once
 	restartPending    atomic.Bool
 }

@@ -204,6 +204,10 @@ const API = {
     return this.request('GET', '/api/dashboard-trends?' + params.toString());
   },
   getSystemSettings() { return this.request('GET', '/api/system-settings'); },
+  getPlaybackStats(range, siteId) { return this.request('GET', '/api/playback-stats?range=' + encodeURIComponent(range || '7d') + '&site_id=' + encodeURIComponent(siteId || 'all')); },
+  getIPAccess() { return this.request('GET', '/api/ip-access'); },
+  saveIPAccess(data) { return this.request('POST', '/api/ip-access', data); },
+  startSelfBuildUpdate() { return this.request('POST', '/api/system/update', { channel: 'self' }); },
   saveSystemSettings(data) { return this.request('POST', '/api/system-settings', data); },
 
   // Sites

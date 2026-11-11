@@ -27,6 +27,7 @@ function globalSettingsNav(active) {
     <a href="#settings-tls" class="settings-nav-item ${active === 'tls' ? 'active' : ''}">TLS 设置</a>
     <a href="#settings-cloudflare" class="settings-nav-item ${active === 'cloudflare' ? 'active' : ''}">Cloudflare</a>
     <a href="#telegram-report" class="settings-nav-item ${active === 'telegram' ? 'active' : ''}">Telegram Bot</a>
+    <a href="#settings-ip-access" class="settings-nav-item ${active === 'ip-access' ? 'active' : ''}">访问控制</a>
     <a href="#backup-restore" class="settings-nav-item ${active === 'backup' ? 'active' : ''}">备份与恢复</a>
   </aside>`;
 }
@@ -218,6 +219,14 @@ function renderSystemUIForm(s) {
     <div class="settings-grid settings-system-fields">
     ${trafficResetDaySelect(s.traffic_reset_day == null ? 1 : s.traffic_reset_day)}
     ${timezoneSelect(s.schedule_timezone, s.schedule_timezone_offset)}
+    <label class="settings-field"><span>回源 IP 协议优先</span>
+      <select class="form-select" id="setting-ip-family">
+        <option value="auto" ${!s.ip_family || s.ip_family === 'auto' ? 'selected' : ''}>自动（系统顺序）</option>
+        <option value="ipv4" ${s.ip_family === 'ipv4' ? 'selected' : ''}>IPv4 优先</option>
+        <option value="ipv6" ${s.ip_family === 'ipv6' ? 'selected' : ''}>IPv6 优先</option>
+      </select>
+      <small>部分源站某个协议族路由更好；无对应地址时自动回退。</small>
+    </label>
     </div>
   </section>${settingsSaveBar()}`;
 }
@@ -317,6 +326,8 @@ async function saveGlobalSettings() {
     const timezoneInput = document.getElementById('setting-schedule-timezone');
     s.schedule_timezone = timezoneInput ? timezoneInput.value : (s.schedule_timezone || 'Asia/Shanghai');
     s.schedule_timezone_offset = numericSetting('setting-schedule-timezone-offset', s.schedule_timezone_offset);
+    const ipFamilyInput = document.getElementById('setting-ip-family');
+    if (ipFamilyInput) s.ip_family = ipFamilyInput.value;
   } else {
     s.log_enabled = checkedSetting('setting-log-enabled', s.log_enabled);
     s.log_level = activeSettingChoice('log-level-choice', s.log_level);
@@ -375,7 +386,8 @@ function renderUpdateSettings() {
     <header><h2>版本更新</h2></header>
     <p class="settings-panel-help">更新前自动备份，启动失败时回滚。</p>
     <div id="update-summary" class="form-help" role="status"></div>
-    <div class="settings-save-bar"><button type="button" class="telegram-btn" id="update-check">检查更新</button><button type="button" class="telegram-btn primary" id="update-install" hidden>更新并重启</button></div>
+    <div class="settings-save-bar"><button type="button" class="telegram-btn" id="update-check">检查更新</button><button type="button" class="telegram-btn primary" id="update-install" hidden>更新并重启</button><button type="button" class="telegram-btn" id="update-self">重装自用版</button></div>
+    <p class="settings-panel-help" style="margin-top:10px">「重装自用版」从自己的 GitHub 发布通道（<span class="mono">local-latest</span>）下载二进制，校验 SHA-256 后替换并重启；启动失败自动回滚。适用于含本地修改的构建。</p>
     <details id="update-notes" hidden><summary>版本说明</summary><pre class="update-release-notes"></pre><a target="_blank" rel="noopener noreferrer">在 GitHub 查看发布内容</a></details>
   </section>`;
 }
@@ -405,6 +417,15 @@ function bindUpdateSettings(page) {
     }
     polling = false;
     if (panel.isConnected) { summary.textContent = '等待超时，请刷新查看服务状态。'; check.disabled = false; }
+  };
+  const selfButton = panel.querySelector('#update-self');
+  if (selfButton) selfButton.onclick = async () => {
+    if (selfButton.disabled) return;
+    if (!window.confirm('从自用版发布通道下载并替换当前二进制？服务会短暂重启，启动失败会自动回滚。')) return;
+    selfButton.disabled = true; check.disabled = true;
+    summary.textContent = '正在下载自用版二进制并校验…';
+    try { await API.startSelfBuildUpdate(); await poll(); }
+    catch (error) { summary.textContent = '重装失败：' + (error.message || '请求异常'); selfButton.disabled = false; check.disabled = false; }
   };
   check.onclick = async () => {
     if (check.disabled) return;

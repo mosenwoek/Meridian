@@ -151,6 +151,12 @@ func (pm *ProxyManager) StartSite(site Site) error {
 	proxyTransport.TLSClientConfig = secureTLSConfig("")
 	proxyTransport.ResponseHeaderTimeout = 30 * time.Second
 	proxyTransport.MaxIdleConnsPerHost = 32
+	// Address-family preference is a global setting: some origins serve a fast
+	// IPv6 path while their IPv4 one is congested, or the reverse.
+	if family := pm.ipFamilyPreference(); family != ipFamilyAuto {
+		dialer := newIPFamilyDialer(family)
+		proxyTransport.DialContext = dialer.DialContext
+	}
 	inst.transport = proxyTransport
 	baseTransport := http.RoundTripper(proxyTransport)
 	if pingCacheState != nil {
@@ -470,6 +476,11 @@ func (pm *ProxyManager) StartSite(site Site) error {
 			}
 		}
 
+		// A PlaybackInfo request marks a playback session start; count it once.
+		if pm.onPlaybackStart != nil && isPlaybackInfoRequest(r.URL.Path) && r.Method == http.MethodPost {
+			pm.onPlaybackStart(site.ID, time.Now())
+		}
+
 		var rw http.ResponseWriter
 		if speedLimitBytes > 0 {
 			rw = &rateLimitedWriter{
@@ -485,6 +496,13 @@ func (pm *ProxyManager) StartSite(site Site) error {
 		} else {
 			rw = &meteredWriter{ResponseWriter: w, written: &inst.bytesOut, cumulative: &inst.cumulativeBytesOut, meter: trafficMeter, quota: inst.quota}
 		}
+		// Media streams get a stall watchdog: a client that stays connected but
+		// stops reading must not keep the origin download alive. The guard sits
+		// above the metering writer so recorded bytes stay accurate.
+		guard := newStreamGuard(rw)
+		stopGuard := guard.watch(r.Context())
+		defer stopGuard()
+		rw = guard.wrap()
 		finalProxy := http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
 			proxy.ServeHTTP(responseWriter, request)
 		})

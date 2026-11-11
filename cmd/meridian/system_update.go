@@ -23,14 +23,22 @@ const releaseAPI = "https://api.github.com/repos/snnabb/Meridian/releases/latest
 var stableVersionPattern = regexp.MustCompile(`^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
 var comparableVersionPattern = regexp.MustCompile(`^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:[-+][0-9A-Za-z.-]+)?$`)
 
+type selfBuildRelease struct {
+	Supported bool   `json:"supported"`
+	Available bool   `json:"available"`
+	URL       string `json:"url"`
+	Reason    string `json:"reason,omitempty"`
+}
+
 type updateRelease struct {
-	Current   string `json:"current_version"`
-	Latest    string `json:"latest_version"`
-	URL       string `json:"release_url"`
-	Notes     string `json:"notes"`
-	Available bool   `json:"update_available"`
-	Supported bool   `json:"update_supported"`
-	Reason    string `json:"unsupported_reason,omitempty"`
+	SelfBuild *selfBuildRelease `json:"self_build,omitempty"`
+	Current   string            `json:"current_version"`
+	Latest    string            `json:"latest_version"`
+	URL       string            `json:"release_url"`
+	Notes     string            `json:"notes"`
+	Available bool              `json:"update_available"`
+	Supported bool              `json:"update_supported"`
+	Reason    string            `json:"unsupported_reason,omitempty"`
 }
 type updateJob struct {
 	State      string `json:"state"`
@@ -142,8 +150,27 @@ func (a *App) handleSystemUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	var request struct {
 		Version string `json:"version"`
+		Channel string `json:"channel"`
 	}
-	if decodeJSONBody(w, r, &request) != nil || !stableVersionPattern.MatchString(request.Version) {
+	if decodeJSONBody(w, r, &request) != nil {
+		a.jsonErr(w, 400, "无效更新请求")
+		return
+	}
+	if request.Channel == "self" {
+		// The self-built channel always reinstalls the current fork build; there
+		// is no version comparison because the tag is a moving "local-latest".
+		body, _ := json.Marshal(struct {
+			Channel string `json:"channel"`
+		}{Channel: "self"})
+		job, err := callUpdateAgent(r.Context(), http.MethodPost, strings.NewReader(string(body)))
+		if err != nil {
+			a.jsonErr(w, 409, err.Error())
+			return
+		}
+		a.jsonOK(w, job)
+		return
+	}
+	if !stableVersionPattern.MatchString(request.Version) {
 		a.jsonErr(w, 400, "请选择有效的正式版本")
 		return
 	}
@@ -176,14 +203,20 @@ func (a *App) handleSystemUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		release.Reason = err.Error()
 	}
+	// The self-built channel is separate from upstream semver tags: it always
+	// compares against the fork's moving "local-latest" release.
+	release.SelfBuild = selfBuildInfo(ctx)
 	a.jsonOK(w, release)
 }
 
 type updateAgent struct {
-	mu        sync.Mutex
-	job       updateJob
-	run       func(string) error
-	stateFile string
+	mu  sync.Mutex
+	job updateJob
+	run func(string) error
+	// runSelfBuild reinstalls the locally built binary from the fork's own
+	// release channel; it is wired only by the root agent.
+	runSelfBuild func(context.Context) error
+	stateFile    string
 }
 
 func (a *updateAgent) persistLocked() {
@@ -212,10 +245,22 @@ func (a *updateAgent) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	var request struct {
 		Version string `json:"version"`
+		Channel string `json:"channel"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&request) != nil || !stableVersionPattern.MatchString(request.Version) {
+	if decoder.Decode(&request) != nil {
+		w.WriteHeader(400)
+		_ = json.NewEncoder(w).Encode(updateJob{Message: "无效更新请求"})
+		return
+	}
+	selfBuild := request.Channel == "self"
+	if selfBuild && a.runSelfBuild == nil {
+		w.WriteHeader(400)
+		_ = json.NewEncoder(w).Encode(updateJob{Message: "当前部署未启用自用版更新"})
+		return
+	}
+	if !selfBuild && !stableVersionPattern.MatchString(request.Version) {
 		w.WriteHeader(400)
 		_ = json.NewEncoder(w).Encode(updateJob{Message: "无效更新版本"})
 		return
@@ -227,12 +272,25 @@ func (a *updateAgent) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(updateJob{Message: "更新正在进行，请等待完成"})
 		return
 	}
-	a.job = updateJob{State: "running", Version: request.Version, StartedAt: time.Now().UTC().Format(time.RFC3339), Message: "正在下载、校验并更新；服务会短暂重启"}
+	label := request.Version
+	message := "正在下载、校验并更新；服务会短暂重启"
+	if selfBuild {
+		label = "self"
+		message = "正在下载自用版二进制、校验并替换；服务会短暂重启"
+	}
+	a.job = updateJob{State: "running", Version: label, StartedAt: time.Now().UTC().Format(time.RFC3339), Message: message}
 	a.persistLocked()
 	job := a.job
 	a.mu.Unlock()
 	go func() {
-		err := a.run(request.Version)
+		var err error
+		if selfBuild {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+			err = a.runSelfBuild(ctx)
+		} else {
+			err = a.run(request.Version)
+		}
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		a.job.FinishedAt = time.Now().UTC().Format(time.RFC3339)
@@ -293,6 +351,16 @@ func runUpdateAgent(args []string) error {
 		command.Stdout = os.Stdout
 		command.Stderr = os.Stderr
 		return command.Run()
+	}
+	agent.runSelfBuild = func(ctx context.Context) error {
+		target, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		if resolved, err := filepath.EvalSymlinks(target); err == nil {
+			target = resolved
+		}
+		return installSelfBuild(ctx, &http.Client{Timeout: 5 * time.Minute}, target, "meridian")
 	}
 	server := &http.Server{Handler: agent, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, MaxHeaderBytes: 8192}
 	return server.Serve(listener)
